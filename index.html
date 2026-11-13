@@ -1,0 +1,1363 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>公園 AI 音樂勸導機器人 — 2D 互動模擬器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            overflow-x: hidden;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+            border-radius: 0.75rem;
+            box-shadow: inset 0 2px 10px rgba(0, 0, 0, 0.15);
+            touch-action: none;
+        }
+        .pulse-badge {
+            animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col">
+
+    <!-- 頂部導覽與提案標題列 -->
+    <header class="bg-slate-800/90 backdrop-blur border-b border-slate-700 px-4 py-3 flex flex-wrap items-center justify-between gap-3 z-10">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center text-xl shadow-lg">
+                🤖
+            </div>
+            <div>
+                <h1 class="text-lg md:text-xl font-bold tracking-tight text-white flex items-center gap-2">
+                    公園 AI 音樂勸導機器人 <span class="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">提案概念模擬 Demo</span>
+                </h1>
+                <p class="text-xs text-slate-400">操作吸菸者於街道與公園移動，體驗「自動煙霧偵測」與「路人按鈕觸發」的 AI 歌聲目光驅趕效果</p>
+            </div>
+        </div>
+
+        <!-- 即時狀態橫幅 -->
+        <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+            <div id="smokingBadge" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold">
+                <span id="smokingIcon" class="text-base">🚬</span>
+                <span id="smokingText">目前狀態：抽菸中</span>
+            </div>
+            <div id="zoneBadge" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-700/80 border border-slate-600 text-slate-200 text-xs font-medium">
+                <span>📍 位置：</span>
+                <span id="zoneText" class="font-bold text-white">正常街道</span>
+            </div>
+            <button id="toggleSmokeBtn" class="px-4 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 text-white font-bold text-xs shadow-md active:scale-95 transition flex items-center gap-1.5 cursor-pointer">
+                <span>🔄 點菸 / 熄菸 (空白鍵)</span>
+            </button>
+        </div>
+    </header>
+
+    <!-- 主內容區：左側模擬畫布 + 右側提案控制面板 -->
+    <main class="flex-1 flex flex-col lg:flex-row gap-4 p-3 md:p-4 max-w-[1600px] w-full mx-auto overflow-hidden">
+        
+        <!-- 左側：2D 遊戲畫布容器 -->
+        <div class="flex-1 flex flex-col bg-slate-800 border border-slate-700 rounded-2xl p-2.5 shadow-2xl relative min-h-[460px] lg:min-h-[620px]">
+            
+            <!-- 浮動歌詞與警報橫幅 (當機器人唱歌時顯示於畫布上方) -->
+            <div id="lyricsOverlay" class="hidden absolute top-5 left-1/2 -translate-x-1/2 z-20 w-[92%] max-w-xl pointer-events-none transition-all duration-300">
+                <div class="bg-slate-900/95 border-2 border-rose-500/80 rounded-2xl px-5 py-3 shadow-2xl flex items-center gap-4">
+                    <div class="text-3xl animate-bounce">🎵</div>
+                    <div class="flex-1">
+                        <div class="flex items-center justify-between mb-0.5">
+                            <span id="activeRobotName" class="text-[11px] font-bold uppercase tracking-wider text-rose-400">🤖 禁菸機器人廣播中（路人全體注視！）</span>
+                            <span id="songStageTag" class="text-[11px] px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 font-semibold">第一階段：吸引注意</span>
+                        </div>
+                        <p id="currentLyricText" class="text-sm md:text-base font-bold text-white tracking-wide">「咳咳——請問是誰的香菸，在公園偷偷點了火？」</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Canvas 本體 -->
+            <div id="canvasContainer" class="flex-1 w-full h-full relative overflow-hidden rounded-xl">
+                <canvas id="gameCanvas"></canvas>
+
+                <!-- 行動裝置虛擬方向鍵 + 熄菸鍵 -->
+                <div class="sm:hidden absolute bottom-3 left-3 flex flex-col items-center gap-1 z-20 opacity-85">
+                    <button data-dir="up" class="dpad-btn w-11 h-11 rounded-lg bg-slate-800/90 border border-slate-600 text-white flex items-center justify-center text-lg active:bg-emerald-600">▲</button>
+                    <div class="flex gap-1">
+                        <button data-dir="left" class="dpad-btn w-11 h-11 rounded-lg bg-slate-800/90 border border-slate-600 text-white flex items-center justify-center text-lg active:bg-emerald-600">◀</button>
+                        <button data-dir="down" class="dpad-btn w-11 h-11 rounded-lg bg-slate-800/90 border border-slate-600 text-white flex items-center justify-center text-lg active:bg-emerald-600">▼</button>
+                        <button data-dir="right" class="dpad-btn w-11 h-11 rounded-lg bg-slate-800/90 border border-slate-600 text-white flex items-center justify-center text-lg active:bg-emerald-600">▶</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 底部操作說明與快速圖例 -->
+            <div class="mt-2.5 pt-2 border-t border-slate-700/80 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300 px-1">
+                <div class="flex flex-wrap items-center gap-3">
+                    <span class="flex items-center gap-1"><kbd class="px-1.5 py-0.5 bg-slate-700 rounded text-slate-200 font-mono">WASD</kbd> 或 <kbd class="px-1.5 py-0.5 bg-slate-700 rounded text-slate-200 font-mono">方向鍵</kbd> 移動人物</span>
+                    <span class="flex items-center gap-1"><kbd class="px-1.5 py-0.5 bg-slate-700 rounded text-slate-200 font-mono">Space 空白鍵</kbd> 點菸 / 熄菸</span>
+                    <span class="text-slate-400 hidden sm:inline">｜ 也可直接點擊地圖任意處讓主角走過去</span>
+                </div>
+                <div class="flex flex-wrap items-center gap-3">
+                    <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-rose-500/40 border border-rose-400 inline-block"></span> 禁菸偵測區</span>
+                    <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-amber-500 inline-block"></span> 民眾求助按鈕</span>
+                    <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-emerald-500/40 border border-emerald-400 inline-block"></span> 安全吸菸區</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右側：提案展示控制面板 -->
+        <aside class="w-full lg:w-80 xl:w-96 flex flex-col gap-3.5 overflow-y-auto">
+            
+            <!-- 1. 抽菸者心理壓力與周遭反應監測 -->
+            <div class="bg-slate-800 border border-slate-700 rounded-2xl p-4 shadow-lg">
+                <div class="flex items-center justify-between mb-2">
+                    <h2 class="text-sm font-bold text-white flex items-center gap-1.5">
+                        <span>💦</span> 抽菸者尷尬壓力值 (驅趕效果)
+                    </h2>
+                    <span id="awkwardValueText" class="text-xs font-mono font-bold text-emerald-400">0% (自在)</span>
+                </div>
+                <div class="w-full h-3 bg-slate-900 rounded-full overflow-hidden border border-slate-700 p-0.5">
+                    <div id="awkwardBar" class="h-full bg-gradient-to-r from-emerald-500 via-amber-500 to-rose-500 rounded-full transition-all duration-150" style="width: 0%"></div>
+                </div>
+                <p id="reactionStatusDesc" class="mt-2.5 text-xs text-slate-300 bg-slate-900/70 rounded-lg p-2.5 border border-slate-700/60 leading-relaxed">
+                    目前未觸發機器人。當主角在<span class="text-rose-400 font-semibold">禁菸區抽菸</span>或<span class="text-amber-400 font-semibold">路人按下求助鈕</span>時，機器人會原地搖晃唱歌，周圍路人會全部轉頭盯著主角看，使主角頭冒冷汗！
+                </p>
+            </div>
+
+            <!-- 2. 快速情境模擬按鈕 (方便報告時一鍵展示) -->
+            <div class="bg-slate-800 border border-slate-700 rounded-2xl p-4 shadow-lg">
+                <h2 class="text-sm font-bold text-white flex items-center gap-1.5 mb-2.5">
+                    <span>⚡</span> 提案情境快速測試 (一鍵傳送)
+                </h2>
+                <div class="grid grid-cols-1 gap-2">
+                    <button id="scenarioAutoBtn" class="w-full text-left px-3 py-2.5 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 transition flex items-center justify-between group cursor-pointer">
+                        <div>
+                            <div class="text-xs font-bold text-rose-300 group-hover:text-rose-200">情境 A：走進禁菸區（機器自動聞到煙味）</div>
+                            <div class="text-[11px] text-slate-400">傳送至中央廣場禁菸區，機器人立即搖晃唱歌</div>
+                        </div>
+                        <span class="text-lg">🤖</span>
+                    </button>
+
+                    <button id="scenarioNpcBtn" class="w-full text-left px-3 py-2.5 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition flex items-center justify-between group cursor-pointer">
+                        <div>
+                            <div class="text-xs font-bold text-amber-300 group-hover:text-amber-200">情境 B：路人聞到二手菸（主動按按鈕求助）</div>
+                            <div class="text-[11px] text-slate-400">在公園步道抽菸，路人嫌棄並跑去按按鈕啟動機器</div>
+                        </div>
+                        <span class="text-lg">🚨</span>
+                    </button>
+
+                    <button id="scenarioSafeBtn" class="w-full text-left px-3 py-2.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 transition flex items-center justify-between group cursor-pointer">
+                        <div>
+                            <div class="text-xs font-bold text-emerald-300 group-hover:text-emerald-200">情境 C：前往安全吸菸區 / 正常街道</div>
+                            <div class="text-[11px] text-slate-400">移步至右下角安全吸菸區，機器立即停止唱歌</div>
+                        </div>
+                        <span class="text-lg">✅</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 3. AI 音樂來源設定 (內建合成曲 + 自訂音檔上傳) -->
+            <div class="bg-slate-800 border border-slate-700 rounded-2xl p-4 shadow-lg flex-1 flex flex-col justify-between">
+                <div>
+                    <div class="flex items-center justify-between mb-2.5">
+                        <h2 class="text-sm font-bold text-white flex items-center gap-1.5">
+                            <span>🎶</span> AI 勸導音樂設定
+                        </h2>
+                        <span id="audioPlayingBadge" class="hidden text-[11px] px-2 py-0.5 rounded-full bg-rose-500 text-white font-bold pulse-badge">播放中</span>
+                    </div>
+
+                    <!-- 音源切換 -->
+                    <div class="space-y-2 mb-3">
+                        <label class="flex items-center gap-2.5 p-2 rounded-lg bg-slate-900/60 border border-slate-700 cursor-pointer hover:border-slate-500 transition">
+                            <input type="radio" name="audioMode" value="synth" checked class="accent-emerald-500">
+                            <div class="text-xs">
+                                <div class="font-bold text-slate-200">預設：內建輕快合成旋律 + 動態三階段歌詞</div>
+                                <div class="text-[11px] text-slate-400">無需準備音檔即可直接展示完整互動</div>
+                            </div>
+                        </label>
+
+                        <label class="flex items-center gap-2.5 p-2 rounded-lg bg-slate-900/60 border border-slate-700 cursor-pointer hover:border-slate-500 transition">
+                            <input type="radio" name="audioMode" value="custom" id="customAudioRadio" class="accent-emerald-500">
+                            <div class="text-xs flex-1">
+                                <div class="font-bold text-slate-200">自訂：上傳你們生成的 AI 音樂 (.mp3 / .wav)</div>
+                                <div id="uploadedFileName" class="text-[11px] text-amber-400 truncate">尚未載入音檔（上傳後自動切換）</div>
+                            </div>
+                        </label>
+                    </div>
+
+                    <!-- 上傳音檔按鈕 -->
+                    <div class="mb-3">
+                        <label class="w-full py-2 px-3 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-200 font-semibold text-xs flex items-center justify-center gap-2 cursor-pointer border border-slate-600 transition">
+                            <span>📂 選擇本機 MP3 / WAV 音樂檔</span>
+                            <input type="file" id="audioFileInput" accept="audio/*" class="hidden">
+                        </label>
+                    </div>
+
+                    <!-- 音量與單獨試聽 -->
+                    <div class="flex items-center gap-3 bg-slate-900/50 px-3 py-2 rounded-xl border border-slate-700/60 mb-3">
+                        <span class="text-xs text-slate-400">🔊 音量</span>
+                        <input type="range" id="volumeSlider" min="0" max="1" step="0.05" value="0.7" class="flex-1 accent-emerald-500 cursor-pointer">
+                        <button id="testAudioBtn" class="px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-xs font-semibold text-emerald-300 border border-slate-600 transition cursor-pointer">
+                            試聽音樂
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 企劃重點備忘 -->
+                <div class="bg-slate-900/90 rounded-xl p-3 border border-slate-700/80 text-[11px] text-slate-400 space-y-1">
+                    <div class="font-bold text-slate-200 mb-1">💡 模擬器設計完全對應企劃書：</div>
+                    <div>1. <strong class="text-slate-200">固定式小機器：</strong>不追人，觸發時原地微幅搖晃並唱出 AI 勸導曲。</div>
+                    <div>2. <strong class="text-slate-200">雙重觸發：</strong>支援走入紅圈自動聞煙味，或路人被燻到去按求助鈕。</div>
+                    <div>3. <strong class="text-slate-200">目光驅趕與熄菸即停：</strong>唱歌時全場路人轉頭注視、主角冒冷汗；一熄菸或離開即刻安靜（不道謝）。</div>
+                </div>
+            </div>
+
+        </aside>
+    </main>
+
+    <script>
+        /**************************************************************
+         * 1. 音訊系統 (支援 Web Audio API 輕快旋律合成 + 自訂 MP3 音檔上傳)
+         **************************************************************/
+        class SoundSystem {
+            constructor() {
+                this.ctx = null;
+                this.mode = 'synth'; // 'synth' or 'custom'
+                this.volume = 0.7;
+                this.isPlaying = false;
+                this.synthTimer = null;
+                this.stepIndex = 0;
+
+                // 自訂上傳音訊物件
+                this.customAudio = new Audio();
+                this.customAudio.loop = true;
+
+                // 輕快木吉他/電鋼琴感 C大調順階和弦旋律 (45秒三階段概念循環)
+                this.melodyNotes = [
+                    // 階段一：吸引注意 (輕巧破冰)
+                    { freq: 523.25, dur: 0.28 }, { freq: 659.25, dur: 0.28 }, { freq: 783.99, dur: 0.42 }, { freq: 659.25, dur: 0.28 },
+                    { freq: 587.33, dur: 0.28 }, { freq: 698.46, dur: 0.28 }, { freq: 659.25, dur: 0.55 }, { freq: 0, dur: 0.2 },
+                    // 階段二：表達困擾 (旋律起伏)
+                    { freq: 440.00, dur: 0.28 }, { freq: 523.25, dur: 0.28 }, { freq: 659.25, dur: 0.38 }, { freq: 587.33, dur: 0.28 },
+                    { freq: 523.25, dur: 0.28 }, { freq: 493.88, dur: 0.28 }, { freq: 392.00, dur: 0.55 }, { freq: 0, dur: 0.2 },
+                    // 階段三：引導離開 (溫和堅定收尾)
+                    { freq: 349.23, dur: 0.28 }, { freq: 440.00, dur: 0.28 }, { freq: 523.25, dur: 0.38 }, { freq: 659.25, dur: 0.38 },
+                    { freq: 587.33, dur: 0.28 }, { freq: 523.25, dur: 0.28 }, { freq: 523.25, dur: 0.65 }, { freq: 0, dur: 0.25 }
+                ];
+
+                // 對應三階段的展示歌詞
+                this.lyricsTimeline = [
+                    { stage: '第一階段：吸引注意', text: '「咳咳——請問是誰的香菸，在公園偷偷點了火？」' },
+                    { stage: '第一階段：吸引注意', text: '「哈囉那位吞雲吐霧的朋友，大家都在看你囉～」' },
+                    { stage: '第二階段：表達困擾', text: '「這片草地想深呼吸，旁邊的路人也皺起眉頭…」' },
+                    { stage: '第二階段：表達困擾', text: '「二手菸飄呀飄過來，散步的心情都被燻壞了～」' },
+                    { stage: '第三階段：引導離開', text: '「請現在就把菸熄掉，或者移步到右下角吸菸區！」' },
+                    { stage: '第三階段：引導離開', text: '「把乾淨空氣還給公園，快快熄菸離開這裡吧～」' }
+                ];
+            }
+
+            initContext() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioCtx();
+                }
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            setVolume(val) {
+                this.volume = parseFloat(val);
+                this.customAudio.volume = this.volume;
+            }
+
+            setMode(mode) {
+                const wasPlaying = this.isPlaying;
+                if (wasPlaying) this.stop();
+                this.mode = mode;
+                if (wasPlaying) this.start();
+            }
+
+            loadCustomFile(file) {
+                const url = URL.createObjectURL(file);
+                this.customAudio.src = url;
+                this.customAudio.volume = this.volume;
+            }
+
+            // 播放路人按下求助按鈕的提示音
+            playButtonPressBeep() {
+                try {
+                    this.initContext();
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(880, this.ctx.currentTime);
+                    osc.frequency.setValueAtTime(1174.66, this.ctx.currentTime + 0.09);
+                    gain.gain.setValueAtTime(this.volume * 0.25, this.ctx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.25);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start();
+                    osc.stop(this.ctx.currentTime + 0.25);
+                } catch (e) {
+                    // 忽略瀏覽器未解鎖音效錯誤
+                }
+            }
+
+            start() {
+                if (this.isPlaying) return;
+                this.isPlaying = true;
+                this.stepIndex = 0;
+                document.getElementById('audioPlayingBadge').classList.remove('hidden');
+
+                if (this.mode === 'custom' && this.customAudio.src) {
+                    this.customAudio.currentTime = 0;
+                    this.customAudio.volume = this.volume;
+                    this.customAudio.play().catch(() => {});
+                    this.startLyricsLoopOnly();
+                } else {
+                    this.initContext();
+                    this.playNextSynthStep();
+                }
+            }
+
+            startLyricsLoopOnly() {
+                const updateLyrics = () => {
+                    if (!this.isPlaying) return;
+                    const lyricIdx = Math.floor(this.stepIndex / 4) % this.lyricsTimeline.length;
+                    updateLyricsBanner(this.lyricsTimeline[lyricIdx]);
+                    this.stepIndex++;
+                    this.synthTimer = setTimeout(updateLyrics, 750);
+                };
+                updateLyrics();
+            }
+
+            playNextSynthStep() {
+                if (!this.isPlaying) return;
+
+                const note = this.melodyNotes[this.stepIndex % this.melodyNotes.length];
+                const lyricIdx = Math.floor((this.stepIndex % this.melodyNotes.length) / 4);
+                updateLyricsBanner(this.lyricsTimeline[lyricIdx]);
+
+                if (note.freq > 0 && this.ctx) {
+                    try {
+                        const now = this.ctx.currentTime;
+                        // 主旋律音色 (溫暖木吉他/馬林巴琴撥弦感)
+                        const osc = this.ctx.createOscillator();
+                        const subOsc = this.ctx.createOscillator();
+                        const gain = this.ctx.createGain();
+
+                        osc.type = 'triangle';
+                        subOsc.type = 'sine';
+                        osc.frequency.setValueAtTime(note.freq, now);
+                        subOsc.frequency.setValueAtTime(note.freq * 0.5, now); // 低八度襯底
+
+                        gain.gain.setValueAtTime(0.001, now);
+                        gain.gain.linearRampToValueAtTime(this.volume * 0.22, now + 0.02);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + note.dur);
+
+                        osc.connect(gain);
+                        subOsc.connect(gain);
+                        gain.connect(this.ctx.destination);
+
+                        osc.start(now);
+                        subOsc.start(now);
+                        osc.stop(now + note.dur);
+                        subOsc.stop(now + note.dur);
+                    } catch (e) {}
+                }
+
+                this.stepIndex++;
+                this.synthTimer = setTimeout(() => this.playNextSynthStep(), note.dur * 1000);
+            }
+
+            stop() {
+                this.isPlaying = false;
+                if (this.synthTimer) {
+                    clearTimeout(this.synthTimer);
+                    this.synthTimer = null;
+                }
+                if (!this.customAudio.paused) {
+                    this.customAudio.pause();
+                    this.customAudio.currentTime = 0;
+                }
+                document.getElementById('audioPlayingBadge').classList.add('hidden');
+            }
+        }
+
+        const soundSystem = new SoundSystem();
+
+        function updateLyricsBanner(lyricObj) {
+            if (!lyricObj) return;
+            document.getElementById('songStageTag').textContent = lyricObj.stage;
+            document.getElementById('currentLyricText').textContent = lyricObj.text;
+        }
+
+        /**************************************************************
+         * 2. 2D 遊戲世界座標與物件設定 (固定邏輯解析度 1000 x 650)
+         **************************************************************/
+        const WORLD_W = 1000;
+        const WORLD_H = 650;
+
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // 公園範圍：(X: 110~890, Y: 90~560)，外圍與十字走道為正常街道
+        // 定義 3 個禁菸區（各有固定式小型機器 + 民眾求助按鈕柱）
+        const noSmokingZones = [
+            {
+                id: 'playground',
+                name: '兒童遊戲禁菸區',
+                x: 270,
+                y: 225,
+                radius: 120,
+                robotX: 270,
+                robotY: 225,
+                buttonX: 360,
+                buttonY: 275,
+                manualTriggerTimer: 0, // 當路人按按鈕後的延長啟動秒數
+                isSinging: false,
+                shakePhase: 0
+            },
+            {
+                id: 'plaza',
+                name: '中央廣場禁菸區',
+                x: 520,
+                y: 325,
+                radius: 130,
+                robotX: 520,
+                robotY: 325,
+                buttonX: 430,
+                buttonY: 385,
+                manualTriggerTimer: 0,
+                isSinging: false,
+                shakePhase: 0
+            },
+            {
+                id: 'bench',
+                name: '長椅休憩禁菸區',
+                x: 745,
+                y: 215,
+                radius: 115,
+                robotX: 745,
+                robotY: 215,
+                buttonX: 655,
+                buttonY: 265,
+                manualTriggerTimer: 0,
+                isSinging: false,
+                shakePhase: 0
+            }
+        ];
+
+        // 定義右下角「安全吸菸區」
+        const safeSmokingZone = {
+            name: '安全吸菸區',
+            x: 710,
+            y: 445,
+            w: 165,
+            h: 105
+        };
+
+        // 玩家主角狀態
+        const player = {
+            x: 160,
+            y: 595, // 初始在下方正常街道
+            radius: 18,
+            speed: 3.4,
+            isSmoking: true,
+            awkwardness: 0, // 0 ~ 100 尷尬壓力值
+            targetX: null,
+            targetY: null,
+            facingAngle: 0
+        };
+
+        // 公園與街道上的路人 NPC 清單
+        const npcs = [
+            { id: 1, name: '散步阿伯', x: 380, y: 310, vx: 0.7, vy: 0.4, color: '#38bdf8', hair: '#94a3b8', state: 'walk', targetZone: null, cooldown: 0 },
+            { id: 2, name: '運動民眾', x: 620, y: 280, vx: -0.8, vy: 0.5, color: '#f472b6', hair: '#475569', state: 'walk', targetZone: null, cooldown: 0 },
+            { id: 3, name: '帶小孩家長', x: 240, y: 290, vx: 0.6, vy: -0.5, color: '#a78bfa', hair: '#1e293b', state: 'walk', targetZone: null, cooldown: 0 },
+            { id: 4, name: '休憩上班族', x: 690, y: 190, vx: -0.6, vy: -0.4, color: '#fbbf24', hair: '#334155', state: 'walk', targetZone: null, cooldown: 0 },
+            { id: 5, name: '賞花市民', x: 480, y: 440, vx: 0.75, vy: -0.3, color: '#34d399', hair: '#0f172a', state: 'walk', targetZone: null, cooldown: 0 },
+            { id: 6, name: '街道路人', x: 480, y: 595, vx: 1.1, vy: 0, color: '#fb923c', hair: '#1e293b', state: 'walk', targetZone: null, cooldown: 0 },
+            { id: 7, name: '慢跑青年', x: 510, y: 180, vx: -0.9, vy: 0.3, color: '#60a5fa', hair: '#1e293b', state: 'walk', targetZone: null, cooldown: 0 }
+        ];
+
+        // 視覺特效粒子 (煙霧、音符、主角冷汗)
+        const smokeParticles = [];
+        const noteParticles = [];
+        const sweatParticles = [];
+
+        // 鍵盤與觸控狀態
+        const keys = { ArrowUp: false, ArrowDown: false, ArrowLeft: false, ArrowRight: false, w: false, a: false, s: false, d: false };
+        let isTestPlayingAudio = false;
+
+        /**************************************************************
+         * 3. 互動控制與事件監聽
+         **************************************************************/
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && document.activeElement.tagName !== 'INPUT') {
+                e.preventDefault();
+                toggleSmoking();
+                return;
+            }
+            if (keys.hasOwnProperty(e.key)) keys[e.key] = true;
+            if (keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = true;
+            player.targetX = null;
+            player.targetY = null;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (keys.hasOwnProperty(e.key)) keys[e.key] = false;
+            if (keys.hasOwnProperty(e.key.toLowerCase())) keys[e.key.toLowerCase()] = false;
+        });
+
+        // 行動版虛擬按鍵支援
+        document.querySelectorAll('.dpad-btn').forEach(btn => {
+            const dir = btn.getAttribute('data-dir');
+            const mapKey = { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight' }[dir];
+            const startMove = (e) => { e.preventDefault(); keys[mapKey] = true; player.targetX = null; };
+            const endMove = (e) => { e.preventDefault(); keys[mapKey] = false; };
+            btn.addEventListener('mousedown', startMove);
+            btn.addEventListener('mouseup', endMove);
+            btn.addEventListener('mouseleave', endMove);
+            btn.addEventListener('touchstart', startMove, { passive: false });
+            btn.addEventListener('touchend', endMove, { passive: false });
+        });
+
+        // 點擊畫布任意處移動 (若點擊在求助按鈕柱上，也可直接觸發按鈕展示)
+        canvas.addEventListener('pointerdown', (e) => {
+            soundSystem.initContext();
+            const rect = canvas.getBoundingClientRect();
+            const scaleX = WORLD_W / rect.width;
+            const scaleY = WORLD_H / rect.height;
+            const clickX = (e.clientX - rect.left) * scaleX;
+            const clickY = (e.clientY - rect.top) * scaleY;
+
+            // 檢查是否直接點擊了某個「民眾求助按鈕」
+            for (const zone of noSmokingZones) {
+                const distBtn = Math.hypot(clickX - zone.buttonX, clickY - zone.buttonY);
+                if (distBtn <= 24) {
+                    zone.manualTriggerTimer = 360; // 啟動約 6 秒
+                    soundSystem.playButtonPressBeep();
+                    return;
+                }
+            }
+
+            player.targetX = clickX;
+            player.targetY = clickY;
+        });
+
+        // 切換點菸 / 熄菸
+        function toggleSmoking(forceState = null) {
+            soundSystem.initContext();
+            player.isSmoking = forceState !== null ? forceState : !player.isSmoking;
+
+            const badge = document.getElementById('smokingBadge');
+            const icon = document.getElementById('smokingIcon');
+            const text = document.getElementById('smokingText');
+
+            if (player.isSmoking) {
+                badge.className = 'flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-bold';
+                icon.textContent = '🚬';
+                text.textContent = '目前狀態：抽菸中';
+            } else {
+                badge.className = 'flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-bold';
+                icon.textContent = '🚭';
+                text.textContent = '目前狀態：已熄菸';
+                // 一旦熄菸，清除所有手動觸發計時並立即停止唱歌（不道謝）
+                noSmokingZones.forEach(z => {
+                    z.manualTriggerTimer = 0;
+                    z.isSinging = false;
+                });
+                npcs.forEach(n => {
+                    if (n.state === 'going_to_button') {
+                        n.state = 'walk';
+                        n.targetZone = null;
+                    }
+                });
+            }
+        }
+
+        document.getElementById('toggleSmokeBtn').addEventListener('click', () => toggleSmoking());
+
+        // 三個快速提案情境按鈕
+        document.getElementById('scenarioAutoBtn').addEventListener('click', () => {
+            soundSystem.initContext();
+            toggleSmoking(true);
+            player.x = 520;
+            player.y = 355; // 中央廣場禁菸區內
+            player.targetX = null;
+        });
+
+        document.getElementById('scenarioNpcBtn').addEventListener('click', () => {
+            soundSystem.initContext();
+            toggleSmoking(true);
+            // 傳送到中央廣場外圍步道，並安排一位路人立刻在旁邊聞到煙味去按按鈕
+            player.x = 415;
+            player.y = 435;
+            player.targetX = null;
+            const helperNpc = npcs[0];
+            helperNpc.x = 435;
+            helperNpc.y = 425;
+            helperNpc.state = 'going_to_button';
+            helperNpc.targetZone = noSmokingZones[1]; // 中央廣場按鈕
+        });
+
+        document.getElementById('scenarioSafeBtn').addEventListener('click', () => {
+            soundSystem.initContext();
+            toggleSmoking(true);
+            player.x = safeSmokingZone.x + safeSmokingZone.w / 2;
+            player.y = safeSmokingZone.y + safeSmokingZone.h / 2;
+            player.targetX = null;
+            noSmokingZones.forEach(z => z.manualTriggerTimer = 0);
+        });
+
+        // 音樂控制面板事件
+        document.querySelectorAll('input[name="audioMode"]').forEach(radio => {
+            radio.addEventListener('change', (e) => {
+                soundSystem.setMode(e.target.value);
+            });
+        });
+
+        document.getElementById('audioFileInput').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            soundSystem.loadCustomFile(file);
+            document.getElementById('uploadedFileName').textContent = `已載入：${file.name}`;
+            document.getElementById('customAudioRadio').checked = true;
+            soundSystem.setMode('custom');
+        });
+
+        document.getElementById('volumeSlider').addEventListener('input', (e) => {
+            soundSystem.setVolume(e.target.value);
+        });
+
+        document.getElementById('testAudioBtn').addEventListener('click', () => {
+            soundSystem.initContext();
+            const btn = document.getElementById('testAudioBtn');
+            if (isTestPlayingAudio) {
+                isTestPlayingAudio = false;
+                soundSystem.stop();
+                btn.textContent = '試聽音樂';
+                btn.classList.replace('text-rose-300', 'text-emerald-300');
+            } else {
+                isTestPlayingAudio = true;
+                soundSystem.start();
+                btn.textContent = '停止試聽';
+                btn.classList.replace('text-emerald-300', 'text-rose-300');
+            }
+        });
+
+        /**************************************************************
+         * 4. 遊戲狀態更新邏輯 (Update Loop)
+         **************************************************************/
+        function isInsideSafeSmokingZone(x, y) {
+            return (
+                x >= safeSmokingZone.x &&
+                x <= safeSmokingZone.x + safeSmokingZone.w &&
+                y >= safeSmokingZone.y &&
+                y <= safeSmokingZone.y + safeSmokingZone.h
+            );
+        }
+
+        function isInsideParkArea(x, y) {
+            return x >= 110 && x <= 890 && y >= 90 && y <= 560;
+        }
+
+        function findNearestZone(x, y) {
+            let best = noSmokingZones[0];
+            let minDist = Infinity;
+            for (const z of noSmokingZones) {
+                const d = Math.hypot(x - z.buttonX, y - z.buttonY);
+                if (d < minDist) {
+                    minDist = d;
+                    best = z;
+                }
+            }
+            return best;
+        }
+
+        function updateGame() {
+            // 1. 處理玩家移動
+            let dx = 0;
+            let dy = 0;
+            if (keys.ArrowUp || keys.w) dy -= 1;
+            if (keys.ArrowDown || keys.s) dy += 1;
+            if (keys.ArrowLeft || keys.a) dx -= 1;
+            if (keys.ArrowRight || keys.d) dx += 1;
+
+            if (dx !== 0 || dy !== 0) {
+                const len = Math.hypot(dx, dy);
+                player.x += (dx / len) * player.speed;
+                player.y += (dy / len) * player.speed;
+                player.facingAngle = Math.atan2(dy, dx);
+            } else if (player.targetX !== null && player.targetY !== null) {
+                const tdx = player.targetX - player.x;
+                const tdy = player.targetY - player.y;
+                const dist = Math.hypot(tdx, tdy);
+                if (dist > 4) {
+                    player.x += (tdx / dist) * player.speed;
+                    player.y += (tdy / dist) * player.speed;
+                    player.facingAngle = Math.atan2(tdy, tdx);
+                } else {
+                    player.targetX = null;
+                    player.targetY = null;
+                }
+            }
+
+            // 邊界限制
+            player.x = Math.max(28, Math.min(WORLD_W - 28, player.x));
+            player.y = Math.max(28, Math.min(WORLD_H - 28, player.y));
+
+            // 判斷玩家當前所在區域
+            const inSafeZone = isInsideSafeSmokingZone(player.x, player.y);
+            const inPark = isInsideParkArea(player.x, player.y);
+            let currentZoneLabel = '正常街道';
+            if (inSafeZone) {
+                currentZoneLabel = '✅ 安全吸菸區';
+            } else if (inPark) {
+                currentZoneLabel = '🌳 公園步道區';
+            }
+
+            // 2. 檢查每個禁菸區機器人的觸發狀態
+            let anyRobotSinging = false;
+            let activeZoneObj = null;
+
+            for (const zone of noSmokingZones) {
+                const distToRobot = Math.hypot(player.x - zone.robotX, player.y - zone.robotY);
+                const insideDetectionCircle = distToRobot <= zone.radius;
+
+                if (insideDetectionCircle) {
+                    currentZoneLabel = `🚫 ${zone.name}`;
+                }
+
+                if (zone.manualTriggerTimer > 0) {
+                    zone.manualTriggerTimer--;
+                }
+
+                // 若玩家正在抽菸、且不在安全吸菸區：
+                // 條件 A：走進機器人自動偵測圓圈
+                // 條件 B：路人按下了該區的求助按鈕 (且玩家仍在公園或附近範圍)
+                const autoTriggered = player.isSmoking && !inSafeZone && insideDetectionCircle;
+                const buttonTriggered = player.isSmoking && !inSafeZone && zone.manualTriggerTimer > 0 && distToRobot <= zone.radius * 2.1;
+
+                if (autoTriggered || buttonTriggered) {
+                    zone.isSinging = true;
+                    zone.shakePhase += 0.35; // 固定原地稍微搖晃
+                    anyRobotSinging = true;
+                    activeZoneObj = zone;
+
+                    // 產生音符粒子
+                    if (Math.random() < 0.16) {
+                        noteParticles.push({
+                            x: zone.robotX + (Math.random() - 0.5) * 30,
+                            y: zone.robotY - 22,
+                            vx: (Math.random() - 0.5) * 1.2,
+                            vy: -1.2 - Math.random() * 0.8,
+                            alpha: 1,
+                            symbol: Math.random() > 0.5 ? '🎵' : '🎶'
+                        });
+                    }
+                } else {
+                    zone.isSinging = false;
+                    zone.shakePhase = 0;
+                }
+            }
+
+            document.getElementById('zoneText').textContent = currentZoneLabel;
+
+            // 3. 處理路人 NPC 行為：散步 / 聞到菸味去按求助按鈕 / 轉頭盯著玩家看
+            for (const npc of npcs) {
+                if (npc.cooldown > 0) npc.cooldown--;
+
+                const distToPlayer = Math.hypot(npc.x - player.x, npc.y - player.y);
+
+                // 如果有機器人正在唱歌，周圍路人全部停下腳步、轉頭盯著主角看
+                if (anyRobotSinging && distToPlayer < 380) {
+                    npc.state = 'staring';
+                    continue;
+                } else if (npc.state === 'staring') {
+                    npc.state = 'walk';
+                }
+
+                // 如果路人正在跑去按求助按鈕
+                if (npc.state === 'going_to_button' && npc.targetZone) {
+                    // 若主角已經熄菸或進了安全吸菸區，路人取消按鈴恢復散步
+                    if (!player.isSmoking || inSafeZone) {
+                        npc.state = 'walk';
+                        npc.targetZone = null;
+                        continue;
+                    }
+                    const bx = npc.targetZone.buttonX;
+                    const by = npc.targetZone.buttonY;
+                    const bDist = Math.hypot(bx - npc.x, by - npc.y);
+                    if (bDist > 12) {
+                        npc.x += ((bx - npc.x) / bDist) * 2.5; // 快步走向按鈕
+                        npc.y += ((by - npc.y) / bDist) * 2.5;
+                    } else {
+                        // 抵達按鈕！啟動該區機器人唱歌
+                        npc.targetZone.manualTriggerTimer = 360; // 持續約 6 秒
+                        soundSystem.playButtonPressBeep();
+                        npc.state = 'staring';
+                        npc.cooldown = 240;
+                        npc.targetZone = null;
+                    }
+                    continue;
+                }
+
+                // 一般散步狀態下，若主角在公園內抽菸且靠近路人 (距離 < 95)，路人被二手菸燻到決定去按按鈕！
+                if (
+                    npc.state === 'walk' &&
+                    npc.cooldown === 0 &&
+                    player.isSmoking &&
+                    !inSafeZone &&
+                    inPark &&
+                    distToPlayer < 95 &&
+                    !anyRobotSinging
+                ) {
+                    npc.state = 'going_to_button';
+                    npc.targetZone = findNearestZone(npc.x, npc.y);
+                    continue;
+                }
+
+                // 正常巡邏移動
+                npc.x += npc.vx;
+                npc.y += npc.vy;
+
+                // 路人邊界反彈
+                if (npc.id === 6) {
+                    // 街道路人沿下方街道行走
+                    if (npc.x < 120 || npc.x > 880) npc.vx *= -1;
+                } else {
+                    if (npc.x < 140 || npc.x > 850) npc.vx *= -1;
+                    if (npc.y < 120 || npc.y > 520) npc.vy *= -1;
+                    // 避免路人走進安全吸菸區
+                    if (isInsideSafeSmokingZone(npc.x, npc.y)) {
+                        npc.vx *= -1;
+                        npc.vy *= -1;
+                    }
+                }
+            }
+
+            // 4. 處理音樂播放與主角「頭冒冷汗 / 尷尬壓力值」
+            const lyricsOverlay = document.getElementById('lyricsOverlay');
+            const reactionDesc = document.getElementById('reactionStatusDesc');
+
+            if (anyRobotSinging) {
+                lyricsOverlay.classList.remove('hidden');
+                document.getElementById('activeRobotName').textContent = `🤖 ${activeZoneObj.name}機器人唱歌勸導中（路人全體注視！）`;
+                if (!soundSystem.isPlaying) {
+                    soundSystem.start();
+                }
+
+                // 增加主角尷尬壓力值並冒冷汗
+                player.awkwardness = Math.min(100, player.awkwardness + 0.65);
+                if (Math.random() < 0.35) {
+                    sweatParticles.push({
+                        x: player.x + (Math.random() > 0.5 ? 14 : -14) + (Math.random() - 0.5) * 6,
+                        y: player.y - 18,
+                        vy: 1.2 + Math.random() * 0.8,
+                        alpha: 1
+                    });
+                }
+
+                reactionDesc.innerHTML = `<span class="text-rose-400 font-bold">⚠️ 機器人正在唱歌驅趕！</span> 周圍路人已全部停下並轉頭盯著主角看（👀），主角頭冒冷汗。請按 <kbd class="px-1 bg-slate-700 rounded">空白鍵</kbd> 熄菸或離開禁菸區！`;
+            } else {
+                lyricsOverlay.classList.add('hidden');
+                if (soundSystem.isPlaying && !isTestPlayingAudio) {
+                    // 遵照需求：機器人不需要道謝，直接停止唱歌即可
+                    soundSystem.stop();
+                }
+                player.awkwardness = Math.max(0, player.awkwardness - 1.2);
+
+                if (inSafeZone && player.isSmoking) {
+                    reactionDesc.innerHTML = `<span class="text-emerald-400 font-bold">✅ 位於安全吸菸區內：</span> 在此吸菸不會觸發機器人，也不會干擾公園路人。`;
+                } else if (!player.isSmoking) {
+                    reactionDesc.innerHTML = `<span class="text-emerald-400 font-bold">🚭 已熄菸狀態：</span> 機器人已立即安靜停止唱歌，路人恢復正常散步。`;
+                } else {
+                    reactionDesc.innerHTML = `目前未觸發機器人。當主角在<span class="text-rose-400 font-semibold">禁菸區抽菸</span>或<span class="text-amber-400 font-semibold">路人按下求助鈕</span>時，機器人會原地搖晃唱歌，周圍路人會全部轉頭盯著主角看！`;
+                }
+            }
+
+            // 更新尷尬壓力條 UI
+            const awkVal = Math.round(player.awkwardness);
+            const awkBar = document.getElementById('awkwardBar');
+            const awkText = document.getElementById('awkwardValueText');
+            awkBar.style.width = `${awkVal}%`;
+            if (awkVal === 0) {
+                awkText.textContent = '0% (自在)';
+                awkText.className = 'text-xs font-mono font-bold text-emerald-400';
+            } else if (awkVal < 60) {
+                awkText.textContent = `${awkVal}% (被注視尷尬中💦)`;
+                awkText.className = 'text-xs font-mono font-bold text-amber-400';
+            } else {
+                awkText.textContent = `${awkVal}% (全場盯看極度尷尬💦💦)`;
+                awkText.className = 'text-xs font-mono font-bold text-rose-400';
+            }
+
+            // 5. 更新煙霧、音符、冷汗粒子
+            if (player.isSmoking && Math.random() < 0.35) {
+                smokeParticles.push({
+                    x: player.x + Math.cos(player.facingAngle) * 14,
+                    y: player.y + Math.sin(player.facingAngle) * 14 - 5,
+                    vx: (Math.random() - 0.5) * 0.6,
+                    vy: -0.8 - Math.random() * 0.5,
+                    size: 5 + Math.random() * 5,
+                    alpha: 0.75
+                });
+            }
+
+            for (let i = smokeParticles.length - 1; i >= 0; i--) {
+                const p = smokeParticles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.size += 0.15;
+                p.alpha -= 0.014;
+                if (p.alpha <= 0) smokeParticles.splice(i, 1);
+            }
+
+            for (let i = noteParticles.length - 1; i >= 0; i--) {
+                const n = noteParticles[i];
+                n.x += n.vx;
+                n.y += n.vy;
+                n.alpha -= 0.018;
+                if (n.alpha <= 0) noteParticles.splice(i, 1);
+            }
+
+            for (let i = sweatParticles.length - 1; i >= 0; i--) {
+                const s = sweatParticles[i];
+                s.y += s.vy;
+                s.alpha -= 0.04;
+                if (s.alpha <= 0) sweatParticles.splice(i, 1);
+            }
+        }
+
+        /**************************************************************
+         * 5. 2D 俯視角場景與角色繪製 (Render Loop)
+         **************************************************************/
+        function drawMapBackground() {
+            // 1. 外部正常人行街道底色
+            ctx.fillStyle = '#334155';
+            ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+
+            // 街道斑馬紋與格線裝飾
+            ctx.strokeStyle = '#475569';
+            ctx.lineWidth = 2;
+            ctx.setLineDash([16, 16]);
+            ctx.strokeRect(55, 45, WORLD_W - 110, WORLD_H - 90);
+            ctx.setLineDash([]);
+
+            // 街道文字標示
+            ctx.fillStyle = 'rgba(226, 232, 240, 0.45)';
+            ctx.font = 'bold 14px "Noto Sans TC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('🛣️ 正常街道（一般人行道）', 500, 32);
+            ctx.fillText('🛣️ 正常街道（一般人行道）', 500, 628);
+
+            // 2. 中央公園綠地基底
+            ctx.fillStyle = '#15803d';
+            ctx.beginPath();
+            ctx.roundRect(110, 90, 780, 470, 24);
+            ctx.fill();
+            ctx.lineWidth = 4;
+            ctx.strokeStyle = '#86efac';
+            ctx.stroke();
+
+            // 公園內部石板步道
+            ctx.fillStyle = '#cbd5e1';
+            // 橫向步道
+            ctx.fillRect(110, 305, 780, 42);
+            // 縱向步道
+            ctx.fillRect(499, 90, 42, 470);
+
+            // 公園裝飾樹木與長椅
+            const trees = [
+                { x: 155, y: 135 }, { x: 430, y: 140 }, { x: 600, y: 135 }, { x: 845, y: 140 },
+                { x: 160, y: 495 }, { x: 375, y: 505 }, { x: 635, y: 505 }
+            ];
+            for (const t of trees) {
+                ctx.fillStyle = 'rgba(0,0,0,0.2)';
+                ctx.beginPath();
+                ctx.arc(t.x + 4, t.y + 5, 22, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#166534';
+                ctx.beginPath();
+                ctx.arc(t.x, t.y, 22, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#22c55e';
+                ctx.beginPath();
+                ctx.arc(t.x - 4, t.y - 4, 15, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // 繪製公園長椅
+            drawBench(715, 155);
+            drawBench(775, 155);
+            drawBench(240, 160);
+
+            // 3. 繪製右下角「安全吸菸區」
+            ctx.fillStyle = 'rgba(16, 185, 129, 0.22)';
+            ctx.strokeStyle = '#34d399';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.roundRect(safeSmokingZone.x, safeSmokingZone.y, safeSmokingZone.w, safeSmokingZone.h, 14);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = '#ecfdf5';
+            ctx.font = 'bold 14px "Noto Sans TC", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('🚬 安全吸菸區', safeSmokingZone.x + safeSmokingZone.w / 2, safeSmokingZone.y + 35);
+            ctx.fillStyle = '#a7f3d0';
+            ctx.font = '12px "Noto Sans TC", sans-serif';
+            ctx.fillText('（指定吸菸角落・不觸發機器）', safeSmokingZone.x + safeSmokingZone.w / 2, safeSmokingZone.y + 58);
+        }
+
+        function drawBench(x, y) {
+            ctx.fillStyle = '#92400e';
+            ctx.fillRect(x - 22, y - 8, 44, 16);
+            ctx.strokeStyle = '#451a03';
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(x - 22, y - 8, 44, 16);
+        }
+
+        function drawNoSmokingZonesAndRobots() {
+            const time = performance.now() * 0.005;
+
+            for (const zone of noSmokingZones) {
+                // 1. 禁菸偵測圓圈範圍
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(zone.robotX, zone.robotY, zone.radius, 0, Math.PI * 2);
+                if (zone.isSinging) {
+                    const pulseAlpha = 0.22 + Math.sin(time * 3) * 0.08;
+                    ctx.fillStyle = `rgba(244, 63, 94, ${pulseAlpha})`;
+                    ctx.strokeStyle = '#fb7185';
+                    ctx.lineWidth = 3;
+                } else {
+                    ctx.fillStyle = 'rgba(244, 63, 94, 0.11)';
+                    ctx.strokeStyle = 'rgba(251, 113, 133, 0.65)';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([8, 6]);
+                }
+                ctx.fill();
+                ctx.stroke();
+                ctx.restore();
+
+                // 區域文字標籤
+                ctx.fillStyle = zone.isSinging ? '#ffe4e6' : 'rgba(255, 228, 230, 0.85)';
+                ctx.font = 'bold 13px "Noto Sans TC", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(`🚭 ${zone.name}`, zone.robotX, zone.robotY - zone.radius + 22);
+
+                // 2. 連接求助按鈕與固定機器的信號虛線
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(zone.robotX, zone.robotY);
+                ctx.lineTo(zone.buttonX, zone.buttonY);
+                ctx.strokeStyle = zone.manualTriggerTimer > 0 ? '#fbbf24' : 'rgba(251, 191, 36, 0.35)';
+                ctx.lineWidth = zone.manualTriggerTimer > 0 ? 2.5 : 1.5;
+                ctx.setLineDash([4, 4]);
+                ctx.stroke();
+                ctx.restore();
+
+                // 3. 繪製「民眾求助按鈕柱」
+                ctx.save();
+                ctx.translate(zone.buttonX, zone.buttonY);
+                ctx.fillStyle = zone.manualTriggerTimer > 0 ? '#ef4444' : '#f59e0b';
+                ctx.beginPath();
+                ctx.arc(0, 0, 12, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#ffffff';
+                ctx.stroke();
+
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 10px "Noto Sans TC", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('求助鈕', 0, 23);
+                ctx.restore();
+
+                // 4. 繪製「固定原地的小型禁菸機器人」(唱歌時會稍微左右搖晃)
+                ctx.save();
+                const shakeOffsetX = zone.isSinging ? Math.sin(zone.shakePhase) * 4.5 : 0;
+                const shakeAngle = zone.isSinging ? Math.sin(zone.shakePhase) * 0.14 : 0;
+                ctx.translate(zone.robotX + shakeOffsetX, zone.robotY);
+                ctx.rotate(shakeAngle);
+
+                // 底座陰影
+                ctx.fillStyle = 'rgba(0,0,0,0.28)';
+                ctx.beginPath();
+                ctx.ellipse(0, 16, 18, 7, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 固定立柱與小巧圓角機身
+                ctx.fillStyle = zone.isSinging ? '#f43f5e' : '#0ea5e9';
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2.5;
+                ctx.beginPath();
+                ctx.roundRect(-16, -16, 32, 30, 9);
+                ctx.fill();
+                ctx.stroke();
+
+                // 機器人天線
+                ctx.beginPath();
+                ctx.moveTo(0, -16);
+                ctx.lineTo(0, -25);
+                ctx.strokeStyle = '#e2e8f0';
+                ctx.lineWidth = 2.5;
+                ctx.stroke();
+                ctx.fillStyle = zone.isSinging ? '#fde047' : '#38bdf8';
+                ctx.beginPath();
+                ctx.arc(0, -26, 4.5, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 機器人螢幕臉部表情
+                ctx.fillStyle = '#0f172a';
+                ctx.beginPath();
+                ctx.roundRect(-11, -10, 22, 14, 4);
+                ctx.fill();
+
+                // 眼睛與唱歌嘴巴
+                ctx.fillStyle = zone.isSinging ? '#fde047' : '#38bdf8';
+                ctx.beginPath();
+                ctx.arc(-5, -4, 2, 0, Math.PI * 2);
+                ctx.arc(5, -4, 2, 0, Math.PI * 2);
+                ctx.fill();
+
+                if (zone.isSinging) {
+                    // 唱歌時張嘴波浪
+                    ctx.fillStyle = '#fb7185';
+                    ctx.beginPath();
+                    ctx.arc(0, 1, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+
+                ctx.restore();
+            }
+        }
+
+        function drawNPCs(anyRobotSinging) {
+            for (const npc of npcs) {
+                // 若正在盯著主角看，畫出視線虛線指向主角
+                if (npc.state === 'staring') {
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.moveTo(npc.x, npc.y);
+                    ctx.lineTo(player.x, player.y);
+                    ctx.strokeStyle = 'rgba(251, 191, 36, 0.35)';
+                    ctx.lineWidth = 1.5;
+                    ctx.setLineDash([5, 5]);
+                    ctx.stroke();
+                    ctx.restore();
+                }
+
+                ctx.save();
+                ctx.translate(npc.x, npc.y);
+
+                // 陰影
+                ctx.fillStyle = 'rgba(0,0,0,0.22)';
+                ctx.beginPath();
+                ctx.ellipse(0, 13, 12, 5, 0, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 身體圓圈
+                ctx.fillStyle = npc.color;
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(0, 0, 13, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                // 計算眼神朝向：若機器人唱歌或跑去按鈴，眼神轉向目標
+                let lookAngle = Math.atan2(npc.vy, npc.vx);
+                if (npc.state === 'staring') {
+                    lookAngle = Math.atan2(player.y - npc.y, player.x - npc.x);
+                } else if (npc.state === 'going_to_button' && npc.targetZone) {
+                    lookAngle = Math.atan2(npc.targetZone.buttonY - npc.y, npc.targetZone.buttonX - npc.x);
+                }
+
+                const eyeCenterX = Math.cos(lookAngle) * 5;
+                const eyeCenterY = Math.sin(lookAngle) * 5;
+                const perpX = -Math.sin(lookAngle) * 4;
+                const perpY = Math.cos(lookAngle) * 4;
+
+                // 眼白與瞳孔 (讓轉頭盯視的效果一目了然)
+                ctx.fillStyle = '#ffffff';
+                ctx.beginPath();
+                ctx.arc(eyeCenterX + perpX, eyeCenterY + perpY, 3.2, 0, Math.PI * 2);
+                ctx.arc(eyeCenterX - perpX, eyeCenterY - perpY, 3.2, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.fillStyle = '#0f172a';
+                ctx.beginPath();
+                ctx.arc(eyeCenterX + perpX + Math.cos(lookAngle) * 1.2, eyeCenterY + perpY + Math.sin(lookAngle) * 1.2, 1.7, 0, Math.PI * 2);
+                ctx.arc(eyeCenterX - perpX + Math.cos(lookAngle) * 1.2, eyeCenterY - perpY + Math.sin(lookAngle) * 1.2, 1.7, 0, Math.PI * 2);
+                ctx.fill();
+
+                // 頭頂狀態氣泡
+                ctx.font = 'bold 12px "Noto Sans TC", sans-serif';
+                ctx.textAlign = 'center';
+                if (npc.state === 'going_to_button') {
+                    ctx.fillStyle = '#fef08a';
+                    ctx.fillText('😠 好臭！去按求助鈕！', 0, -20);
+                } else if (npc.state === 'staring') {
+                    ctx.fillStyle = '#fde047';
+                    ctx.fillText('👀 盯——', 0, -20);
+                }
+
+                ctx.restore();
+            }
+        }
+
+        function drawPlayer(anyRobotSinging) {
+            // 若點擊移動中有目標點，畫出地面目標光圈
+            if (player.targetX !== null && player.targetY !== null) {
+                ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(player.targetX, player.targetY, 10, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+
+            ctx.save();
+            ctx.translate(player.x, player.y);
+
+            // 陰影
+            ctx.fillStyle = 'rgba(0,0,0,0.3)';
+            ctx.beginPath();
+            ctx.ellipse(0, 16, 15, 6, 0, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 主角身體 (當被機器人唱歌且全場盯著看時，外框閃爍警示紅光)
+            ctx.fillStyle = player.isSmoking ? '#f97316' : '#10b981';
+            ctx.strokeStyle = anyRobotSinging ? '#ffe4e6' : '#ffffff';
+            ctx.lineWidth = anyRobotSinging ? 3.5 : 2.5;
+            ctx.beginPath();
+            ctx.arc(0, 0, player.radius, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+
+            // 主角眼睛與表情
+            const ex = Math.cos(player.facingAngle) * 5;
+            const ey = Math.sin(player.facingAngle) * 5;
+            const px = -Math.sin(player.facingAngle) * 5;
+            const py = Math.cos(player.facingAngle) * 5;
+
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(ex + px, ey + py, 3.5, 0, Math.PI * 2);
+            ctx.arc(ex - px, ey - py, 3.5, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.fillStyle = '#0f172a';
+            ctx.beginPath();
+            ctx.arc(ex + px, ey + py, 1.8, 0, Math.PI * 2);
+            ctx.arc(ex - px, ey - py, 1.8, 0, Math.PI * 2);
+            ctx.fill();
+
+            // 手上的香菸圖示
+            if (player.isSmoking) {
+                const cigX = Math.cos(player.facingAngle) * 15;
+                const cigY = Math.sin(player.facingAngle) * 15;
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 3.5;
+                ctx.beginPath();
+                ctx.moveTo(cigX * 0.6, cigY * 0.6);
+                ctx.lineTo(cigX * 1.25, cigY * 1.25);
+                ctx.stroke();
+
+                // 火星
+                ctx.fillStyle = '#ef4444';
+                ctx.beginPath();
+                ctx.arc(cigX * 1.28, cigY * 1.28, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // 主角名牌與冒冷汗提示
+            ctx.font = 'bold 12px "Noto Sans TC", sans-serif';
+            ctx.textAlign = 'center';
+            if (anyRobotSinging) {
+                ctx.fillStyle = '#fecdd3';
+                ctx.fillText('😰 主角 (被全場盯著冒冷汗💦)', 0, -26);
+            } else {
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(player.isSmoking ? '🧑 主角 (抽菸中🚬)' : '🧑 主角 (已熄菸🚭)', 0, -24);
+            }
+
+            ctx.restore();
+        }
+
+        function drawParticles() {
+            // 1. 煙霧粒子
+            for (const p of smokeParticles) {
+                ctx.fillStyle = `rgba(226, 232, 240, ${p.alpha})`;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // 2. 機器人音符粒子
+            ctx.font = '18px sans-serif';
+            ctx.textAlign = 'center';
+            for (const n of noteParticles) {
+                ctx.globalAlpha = Math.max(0, n.alpha);
+                ctx.fillText(n.symbol, n.x, n.y);
+            }
+            ctx.globalAlpha = 1;
+
+            // 3. 主角頭頂冷汗水滴 (💦)
+            ctx.font = '15px sans-serif';
+            for (const s of sweatParticles) {
+                ctx.globalAlpha = Math.max(0, s.alpha);
+                ctx.fillText('💦', s.x, s.y);
+            }
+            ctx.globalAlpha = 1;
+        }
+
+        /**************************************************************
+         * 6. 畫布自適應縮放與主迴圈啟動
+         **************************************************************/
+        function resizeCanvas() {
+            canvas.width = WORLD_W;
+            canvas.height = WORLD_H;
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+
+        function gameLoop() {
+            updateGame();
+
+            ctx.clearRect(0, 0, WORLD_W, WORLD_H);
+            drawMapBackground();
+            drawNoSmokingZonesAndRobots();
+
+            const anyRobotSinging = noSmokingZones.some(z => z.isSinging);
+            drawNPCs(anyRobotSinging);
+            drawPlayer(anyRobotSinging);
+            drawParticles();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        window.onload = function () {
+            resizeCanvas();
+            gameLoop();
+        };
+    </script>
+</body>
+</html>
